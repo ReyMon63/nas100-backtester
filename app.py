@@ -314,19 +314,24 @@ col_l, col_r = st.columns(2)
 
 with col_l:
     st.subheader("🥧 Distribución")
-    # 3 rebanadas: Ganadoras + BE + Perdedoras = Total siempre
-    # EOD ya está distribuido dentro de ganadoras/perdedoras; se muestra solo en métricas
-    pie_labels = ["Ganadoras", "BE", "Perdedoras"]
-    pie_values = [len(wins), len(bes), len(losses)]
-    pie_colors = ["#00d4aa", "#f0a500", "#ff4b4b"]
-    # Ocultar categorías con 0 para no mostrar slice vacío
-    pie_data = [(l, v, c) for l, v, c in zip(pie_labels, pie_values, pie_colors) if v > 0]
+    # Sub-gajos por tipo de cierre; EOD en tono claro dentro de la misma familia
+    wins_tp  = [t for t in wins   if t.exit_reason != "EOD"]
+    loss_sl  = [t for t in losses if t.exit_reason != "EOD"]
+    pie_items = [
+        ("Ganadoras TP",    len(wins_tp),  "#00d4aa"),   # verde intenso
+        ("Ganadoras EOD+",  len(eod_w),    "#7fe8cf"),   # verde claro
+        ("BE",              len(bes),      "#f0a500"),   # ámbar
+        ("Perdedoras SL",   len(loss_sl),  "#ff4b4b"),   # rojo intenso
+        ("Perdedoras EOD−", len(eod_l),    "#ff9999"),   # rojo claro
+    ]
+    pie_data = [(l, v, c) for l, v, c in pie_items if v > 0]
     fig_pie = go.Figure(go.Pie(
         labels=[d[0] for d in pie_data],
         values=[d[1] for d in pie_data],
         marker_colors=[d[2] for d in pie_data],
         hole=0.4,
         textinfo="label+percent+value",
+        sort=False,   # mantener el orden: TP → EOD+ → BE → SL → EOD−
     ))
     fig_pie.update_layout(
         height=280, margin=dict(l=0, r=0, t=10, b=0),
