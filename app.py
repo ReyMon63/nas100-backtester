@@ -201,9 +201,14 @@ if run_btn:
         )
 
         trades = run_backtest(df, cfg)
-        st.session_state["trades"]  = trades
-        st.session_state["cfg"]     = cfg
-        st.session_state["tbl_page"] = 0   # reinicia paginación
+        # Días hábiles = días que tuvieron barra de apertura 9:40 NY
+        trading_days = int(
+            df[(df["h_ny"] == 9) & (df["m_ny"] == 40)]["date_ny"].nunique()
+        )
+        st.session_state["trades"]        = trades
+        st.session_state["cfg"]           = cfg
+        st.session_state["trading_days"]  = trading_days
+        st.session_state["tbl_page"]      = 0
 
     if not trades:
         st.info("No se encontraron operaciones en el período cargado.")
@@ -223,8 +228,9 @@ if "trades" not in st.session_state or not st.session_state["trades"]:
     )
     st.stop()
 
-trades = st.session_state["trades"]
-cfg    = st.session_state["cfg"]
+trades       = st.session_state["trades"]
+cfg          = st.session_state["cfg"]
+trading_days = st.session_state.get("trading_days", 0)
 
 # ══════════════════════════════════════════════════════════════════════
 #  MÉTRICAS RESUMEN
@@ -266,15 +272,18 @@ c6.metric("Sin pérdida",   f"{no_loss:.1f}%",
           help="(Ganadoras + BE) ÷ Total")
 
 c1, c2, c3, c4, c5, c6 = st.columns(6)
-c1.metric("Ganadoras",    len(wins),
+days_traded  = len({t.entry_dt.date() for t in trades})
+days_no_trade = max(0, trading_days - days_traded)
+
+c1.metric("Ganadoras",     len(wins),
           help=f"TP: {len(wins)-len(eod_w)}  |  EOD+: {len(eod_w)}")
-c2.metric("BE",           len(bes))
-c3.metric("Perdedoras",   len(losses),
+c2.metric("BE",            len(bes))
+c3.metric("Perdedoras",    len(losses),
           help=f"SL: {len(losses)-len(eod_l)}  |  EOD−: {len(eod_l)}")
-c4.metric("EOD",          len(eods),
-          help=f"Cerradas por hora: {len(eod_w)} ganadoras, {len(eod_l)} perdedoras")
-c5.metric("Capital ini.", f"${initial_capital:,.0f}")
-c6.metric("Capital fin.", f"${initial_capital + total_usd:,.2f}")
+c4.metric("Días sin op.",  days_no_trade,
+          help=f"Días con barra 9:40 NY: {trading_days}  |  Días operados: {days_traded}")
+c5.metric("Capital ini.",  f"${initial_capital:,.0f}")
+c6.metric("Capital fin.",  f"${initial_capital + total_usd:,.2f}")
 
 # ══════════════════════════════════════════════════════════════════════
 #  CURVA DE EQUITY
