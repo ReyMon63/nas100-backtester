@@ -231,31 +231,44 @@ cfg    = st.session_state["cfg"]
 # ══════════════════════════════════════════════════════════════════════
 total_usd = sum(t.pnl_usd for t in trades)
 total_pts = sum(t.pnl_pts for t in trades)
-wins      = [t for t in trades if t.pnl_usd > 0]
-losses    = [t for t in trades if t.pnl_usd <= 0]
 n         = len(trades)
-wr        = len(wins) / n * 100
-avg_win   = sum(t.pnl_usd for t in wins)   / len(wins)   if wins   else 0.0
-avg_loss  = sum(t.pnl_usd for t in losses) / len(losses) if losses else 0.0
-pf        = abs(sum(t.pnl_usd for t in wins) / sum(t.pnl_usd for t in losses)) \
-            if losses and sum(t.pnl_usd for t in losses) != 0 else float("inf")
+
+# Clasificación por exit_reason (TP/BE/SL); EOD y END por signo de P&L
+def _classify(t):
+    if t.exit_reason == "TP":                           return "win"
+    if t.exit_reason == "BE":                           return "be"
+    if t.exit_reason == "SL":                           return "loss"
+    return "win" if t.pnl_usd > 0 else ("be" if t.pnl_usd == 0 else "loss")
+
+wins   = [t for t in trades if _classify(t) == "win"]
+bes    = [t for t in trades if _classify(t) == "be"]
+losses = [t for t in trades if _classify(t) == "loss"]
+
+wr       = len(wins) / n * 100 if n else 0.0
+no_loss  = (len(wins) + len(bes)) / n * 100 if n else 0.0
+avg_win  = sum(t.pnl_usd for t in wins)   / len(wins)   if wins   else 0.0
+avg_loss = sum(t.pnl_usd for t in losses) / len(losses) if losses else 0.0
+pf_denom = sum(t.pnl_usd for t in losses)
+pf       = abs(sum(t.pnl_usd for t in wins) / pf_denom) \
+           if losses and pf_denom != 0 else float("inf")
 
 st.subheader("📋 Resumen")
 c1, c2, c3, c4, c5, c6 = st.columns(6)
 c1.metric("Operaciones",   n)
-c2.metric("Win Rate",      f"{wr:.1f}%")
+c2.metric("Win Rate",      f"{wr:.1f}%",    help="Solo operaciones con TP")
 c3.metric("P&L Total",     f"${total_usd:+,.2f}")
 c4.metric("Retorno",       f"{total_usd/initial_capital*100:+.2f}%")
-c5.metric("Profit Factor", f"{pf:.2f}" if pf != float("inf") else "∞")
-c6.metric("Prom. ganada",  f"${avg_win:,.2f}")
+c5.metric("Profit Factor", f"{pf:.2f}" if pf != float("inf") else "∞",
+          help="Ganancias brutas / Pérdidas brutas (excluye BE)")
+c6.metric("Sin pérdida",   f"{no_loss:.1f}%", help="Ganadoras + BE sobre total")
 
 c1, c2, c3, c4, c5, c6 = st.columns(6)
 c1.metric("Ganadoras",    len(wins))
-c2.metric("Perdedoras",   len(losses))
-c3.metric("Capital ini.", f"${initial_capital:,.0f}")
-c4.metric("Capital fin.", f"${initial_capital + total_usd:,.2f}")
-c5.metric("P&L puntos",   f"{total_pts:+.2f}")
-c6.metric("Prom. perdida",f"${avg_loss:,.2f}")
+c2.metric("BE",           len(bes))
+c3.metric("Perdedoras",   len(losses))
+c4.metric("Capital ini.", f"${initial_capital:,.0f}")
+c5.metric("Capital fin.", f"${initial_capital + total_usd:,.2f}")
+c6.metric("P&L puntos",   f"{total_pts:+.2f}")
 
 # ══════════════════════════════════════════════════════════════════════
 #  CURVA DE EQUITY
@@ -295,10 +308,15 @@ col_l, col_r = st.columns(2)
 
 with col_l:
     st.subheader("🥧 Distribución")
+    pie_labels = ["Ganadoras", "BE", "Perdedoras"]
+    pie_values = [len(wins), len(bes), len(losses)]
+    pie_colors = ["#00d4aa", "#f0a500", "#ff4b4b"]
+    # Ocultar categorías con 0 para no mostrar slice vacío
+    pie_data = [(l, v, c) for l, v, c in zip(pie_labels, pie_values, pie_colors) if v > 0]
     fig_pie = go.Figure(go.Pie(
-        labels=["Ganadoras", "Perdedoras"],
-        values=[len(wins), len(losses)],
-        marker_colors=["#00d4aa", "#ff4b4b"],
+        labels=[d[0] for d in pie_data],
+        values=[d[1] for d in pie_data],
+        marker_colors=[d[2] for d in pie_data],
         hole=0.4,
         textinfo="label+percent+value",
     ))
@@ -388,12 +406,29 @@ end_idx   = min(start_idx + rows_per_page, total_rows)
 df_page   = df_trades.iloc[start_idx:end_idx]
 
 # ── Estilos ───────────────────────────────────────────────────────────
-def color_pnl(val):
-    color = "#00d4aa" if val > 0 else "#ff4b4b" if val < 0 else "#fafafa"
-    return f"color: {color}; font-weight: bold"
+def _color_row(df):
+    """Colorea P&L $ y P&L pts según exit_reason: TP=verde, BE=ámbar, SL/otro=rojo."""
+    out = pd.DataFrame("", index=df.index, columns=df.columns)
+    for idx, row in df.iterrows():
+        reason = row.get("Razón", "")
+        if reason == "TP" or (reason not in ("BE", "SL") and row["P&L $"] > 0):
+            c = "color: #00d4aa; font-weight: bold"
+        elif reason == "BE":
+            c = "color: #f0a500; font-weight: bold"
+        else:
+            c = "color: #ff4b4b; font-weight: bold"
+        out.loc[idx, "P&L $"]  = c
+        out.loc[idx, "P&L pts"] = c
+    return out
 
 def color_dir(val):
     return "color: #00d4aa" if val == "LONG" else "color: #ff4b4b"
+
+def color_reason(val):
+    if val == "TP":  return "color: #00d4aa; font-weight: bold"
+    if val == "BE":  return "color: #f0a500; font-weight: bold"
+    if val == "SL":  return "color: #ff4b4b; font-weight: bold"
+    return ""
 
 fmt = {
     "Entrada":  "{:.2f}", "SL orig": "{:.2f}", "TP":       "{:.2f}",
@@ -402,19 +437,19 @@ fmt = {
     "P&L pts":  "{:+.2f}", "P&L $":  "${:+,.2f}",
     "Equity":   "${:,.2f}",
 }
-try:   # pandas 2.1+ renombró applymap → map
+
+_s = df_page.style.apply(_color_row, axis=None)
+try:
     styled = (
-        df_page.style
-        .map(color_pnl, subset=["P&L $", "P&L pts"])
-        .map(color_dir, subset=["Dir"])
-        .format(fmt)
+        _s.map(color_dir,    subset=["Dir"])
+          .map(color_reason, subset=["Razón"])
+          .format(fmt)
     )
 except AttributeError:
     styled = (
-        df_page.style
-        .applymap(color_pnl, subset=["P&L $", "P&L pts"])
-        .applymap(color_dir, subset=["Dir"])
-        .format(fmt)
+        _s.applymap(color_dir,    subset=["Dir"])
+          .applymap(color_reason, subset=["Razón"])
+          .format(fmt)
     )
 
 st.dataframe(styled, use_container_width=True, hide_index=True)
