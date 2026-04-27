@@ -290,18 +290,27 @@ if run_btn:
     def color_dir(val):
         return "color: #00d4aa" if val == "LONG" else "color: #ff4b4b"
 
-    styled = (
-        df_trades.style
-        .applymap(color_pnl, subset=["P&L $", "P&L pts"])
-        .applymap(color_dir, subset=["Dir"])
-        .format({
-            "Entrada": "{:.2f}", "SL orig": "{:.2f}", "TP": "{:.2f}",
-            "Exit px": "{:.2f}", "SL pts": "{:.2f}",
-            "Riesgo $": "${:,.2f}", "Riesgo %": "{:.2f}%",
-            "P&L pts": "{:+.2f}", "P&L $": "${:+,.2f}",
-            "Equity": "${:,.2f}",
-        })
-    )
+    fmt = {
+        "Entrada": "{:.2f}", "SL orig": "{:.2f}", "TP": "{:.2f}",
+        "Exit px": "{:.2f}", "SL pts": "{:.2f}",
+        "Riesgo $": "${:,.2f}", "Riesgo %": "{:.2f}%",
+        "P&L pts": "{:+.2f}", "P&L $": "${:+,.2f}",
+        "Equity": "${:,.2f}",
+    }
+    try:  # pandas 2.1+ uses Styler.map; older uses Styler.applymap
+        styled = (
+            df_trades.style
+            .map(color_pnl, subset=["P&L $", "P&L pts"])
+            .map(color_dir, subset=["Dir"])
+            .format(fmt)
+        )
+    except AttributeError:
+        styled = (
+            df_trades.style
+            .applymap(color_pnl, subset=["P&L $", "P&L pts"])
+            .applymap(color_dir, subset=["Dir"])
+            .format(fmt)
+        )
     st.dataframe(styled, use_container_width=True, hide_index=True)
 
     # ── Distribución de resultados ────────────────────────────────────
