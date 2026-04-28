@@ -37,7 +37,8 @@ section[data-testid="stSidebar"]
 """, unsafe_allow_html=True)
 
 st.title("📈 NAS100 — Canal Apertura NY · HAL&Reymon v1.1")
-st.caption("Backtester · ThinkMarkets US100 CFD · $1/pt por lote · Sin VPC")
+# El caption se reemplaza con el resumen de parámetros tras cada backtest
+_caption_slot = st.empty()
 
 # ══════════════════════════════════════════════════════════════════════
 #  SIDEBAR — botón primero (sticky), luego parámetros (scroll)
@@ -242,10 +243,33 @@ if run_btn:
         trading_days = int(
             df[(df["h_ny"] == 9) & (df["m_ny"] == 40)]["date_ny"].nunique()
         )
-        st.session_state["trades"]        = trades
-        st.session_state["cfg"]           = cfg
-        st.session_state["trading_days"]  = trading_days
-        st.session_state["tbl_page"]      = 0
+        # Construir resumen de parámetros para el caption
+        _dr = date_range if isinstance(date_range, (list, tuple)) and len(date_range) == 2 \
+              else (st.session_state["df_dmin"], st.session_state["df_dmax"])
+        _ind = []
+        if use_ema:   _ind.append(f"EMA({ema_len})")
+        if use_vidya: _ind.append(f"VIDYA({vidya_len}/{vidya_mom})")
+        if use_tp:    _ind.append(f"2-Pole({tp_len})" + (" ×2" if tp_double else "") +
+                                  (" favor" if tp_favor.startswith("A favor") else " contra"))
+        _flags = []
+        if triada_on:  _flags.append("TRIADA")
+        if manage_risk: _flags.append("BE@1R")
+        if eod_on:     _flags.append(f"EOD {eod_hour}:{eod_min:02d}NY")
+        if sl_buffer:  _flags.append(f"Buffer {sl_buffer}%")
+
+        _param_summary = (
+            f"📅 {_dr[0].strftime('%d/%m/%Y')} → {_dr[1].strftime('%d/%m/%Y')}  ·  "
+            f"💰 ${initial_capital:,.0f} · ×{leverage} · Riesgo {risk_pct}%/op  ·  "
+            f"📐 RR 1:{rr} · Swing {'✓' if swing_on else '✗'}{f'({swing_bars}v)' if swing_on else ''}  ·  "
+            f"📊 {' | '.join(_ind) if _ind else 'Sin indicadores'}"
+            + (f"  ·  🔀 {' · '.join(_flags)}" if _flags else "")
+        )
+
+        st.session_state["trades"]         = trades
+        st.session_state["cfg"]            = cfg
+        st.session_state["trading_days"]   = trading_days
+        st.session_state["param_summary"]  = _param_summary
+        st.session_state["tbl_page"]       = 0
 
     if not trades:
         st.info("No se encontraron operaciones en el período cargado.")
@@ -253,6 +277,7 @@ if run_btn:
 
 # Recuperar trades previos o salir con pantalla inicial
 if "trades" not in st.session_state or not st.session_state["trades"]:
+    _caption_slot.caption("ThinkMarkets US100 CFD · $1/pt por lote · Sin VPC")
     st.info(
         "👈 **Sube tu CSV** en el panel lateral y ajusta los parámetros, "
         "luego presiona **▶ Ejecutar Backtest**.\n\n"
@@ -268,6 +293,9 @@ if "trades" not in st.session_state or not st.session_state["trades"]:
 trades       = st.session_state["trades"]
 cfg          = st.session_state["cfg"]
 trading_days = st.session_state.get("trading_days", 0)
+
+# Mostrar resumen de parámetros del backtest activo
+_caption_slot.caption(st.session_state.get("param_summary", ""))
 
 # ══════════════════════════════════════════════════════════════════════
 #  MÉTRICAS RESUMEN
