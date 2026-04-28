@@ -238,11 +238,12 @@ if run_btn:
             eod_min         = int(eod_min),
         )
 
-        trades = run_backtest(df, cfg)
-        # Días hábiles = días que tuvieron barra de apertura 9:40 NY
-        trading_days = int(
-            df[(df["h_ny"] == 9) & (df["m_ny"] == 40)]["date_ny"].nunique()
-        )
+        trades, warmup_cutoff_date = run_backtest(df, cfg)
+        # Días hábiles elegibles = días con barra 9:40 NY a partir del fin del warmup
+        _df940 = df[(df["h_ny"] == 9) & (df["m_ny"] == 40)]
+        if warmup_cutoff_date is not None:
+            _df940 = _df940[_df940["date_ny"] >= warmup_cutoff_date]
+        trading_days = int(_df940["date_ny"].nunique())
         # Construir resumen de parámetros para el caption
         _dr = date_range if isinstance(date_range, (list, tuple)) and len(date_range) == 2 \
               else (st.session_state["df_dmin"], st.session_state["df_dmax"])

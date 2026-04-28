@@ -242,7 +242,7 @@ def calc_qty(cfg: Config, equity: float, entry_price: float, risk_pts: float) ->
 # ══════════════════════════════════════════════════════════════════════
 #  MOTOR DE BACKTESTING
 # ══════════════════════════════════════════════════════════════════════
-def run_backtest(df: pd.DataFrame, cfg: Config) -> list[Trade]:
+def run_backtest(df: pd.DataFrame, cfg: Config) -> tuple[list[Trade], object]:
     bar_940 = (df["h_ny"] == 9)  & (df["m_ny"] == 40)
     bar_eod = (df["h_ny"] == cfg.eod_hour) & (df["m_ny"] == cfg.eod_min)
 
@@ -264,13 +264,29 @@ def run_backtest(df: pd.DataFrame, cfg: Config) -> list[Trade]:
     slippage = cfg.slippage_ticks * cfg.tick_size
     pv       = cfg.point_value
 
-    trades:   list[Trade] = []
-    pos:      Optional[Trade] = None
-    equity:   float = cfg.initial_capital
-    day_done: dict  = {}
+    # ── Warmup: primera barra donde TODOS los indicadores activos son no-NaN ──
+    # No se abre ningún trade antes de ese punto para no contaminar el análisis.
+    def _first_valid(arr: np.ndarray) -> int:
+        idx = np.where(~np.isnan(arr))[0]
+        return int(idx[0]) if len(idx) else len(arr)
+
+    warmup_end = 3   # mínimo para calcular el canal (i-2)
+    if cfg.use_ema   and ema_v   is not None: warmup_end = max(warmup_end, _first_valid(ema_v))
+    if cfg.use_vidya and vidya_v is not None: warmup_end = max(warmup_end, _first_valid(vidya_v))
+    if cfg.use_tp    and twop_v  is not None: warmup_end = max(warmup_end, _first_valid(twop_v))
+
+    # Fecha del primer día hábil elegible (primer 9:40 NY en o después de warmup_end)
+    _mask = (df["h_ny"] == 9) & (df["m_ny"] == 40)
+    _elegibles = df[_mask & (df.index >= warmup_end)]["date_ny"]
+    warmup_cutoff_date = _elegibles.iloc[0] if len(_elegibles) else None
+
+    trades:  list[Trade] = []
+    pos:     Optional[Trade] = None
+    equity:  float = cfg.initial_capital
+    day_done: dict = {}
     n = len(df)
 
-    for i in range(3, n):
+    for i in range(warmup_end, n):
         date_ny = df["date_ny"].iloc[i]
         dt_ny   = df["dt_ny"].iloc[i]
 
@@ -336,8 +352,12 @@ def run_backtest(df: pd.DataFrame, cfg: Config) -> list[Trade]:
             continue
 
         # ── 4. Evaluar barra 9:40 NY ──────────────────────────────────────
-        if not bar_940.iloc[i] or day_done.get(date_ny, False) or pos:
+        if not bar_940.iloc[i]:
             continue
+        if day_done.get(date_ny, False):
+            continue   # ya operamos hoy (no registrar como skip)
+        if pos:
+            continue   # posición abierta — no se puede entrar otra
 
         # ── 5. Canal (barras 9:30, 9:35, 9:40 NY) ────────────────────────
         ch_hi  = max(hi[i-2], hi[i-1], hi[i])
@@ -467,7 +487,7 @@ def run_backtest(df: pd.DataFrame, cfg: Config) -> list[Trade]:
         pos.equity_post = equity
         trades.append(pos)
 
-    return trades
+    return trades, warmup_cutoff_date
 
 
 # ══════════════════════════════════════════════════════════════════════
