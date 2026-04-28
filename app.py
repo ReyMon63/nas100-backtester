@@ -55,6 +55,36 @@ with st.sidebar:
         type=["csv", "txt"],
     )
 
+    # Parsear y guardar en session_state solo cuando cambia el archivo
+    if uploaded is not None:
+        file_key = f"{uploaded.name}_{uploaded.size}"
+        if st.session_state.get("_file_key") != file_key:
+            try:
+                _df = load_data(uploaded)
+                st.session_state["df_raw"]    = _df
+                st.session_state["_file_key"] = file_key
+                st.session_state["df_dmin"]   = _df["date_ny"].min()
+                st.session_state["df_dmax"]   = _df["date_ny"].max()
+            except Exception as e:
+                st.error(f"Error al leer el CSV: {e}")
+
+    # Mostrar estado del CSV y selector de fechas
+    if "df_raw" in st.session_state:
+        dmin = st.session_state["df_dmin"]
+        dmax = st.session_state["df_dmax"]
+        st.caption(f"✅ CSV en memoria · {dmin.strftime('%d/%m/%Y')} → {dmax.strftime('%d/%m/%Y')}")
+
+        date_range = st.date_input(
+            "📅 Rango de backtesting",
+            value=(dmin, dmax),
+            min_value=dmin,
+            max_value=dmax,
+            format="DD/MM/YYYY",
+        )
+    else:
+        st.caption("⬆️ Sube tu CSV una vez — se recuerda para toda la sesión.")
+        date_range = None
+
     # ── Mi Cuenta ──────────────────────────────────────────────────────
     st.subheader("💰 Mi Cuenta")
     initial_capital = st.number_input(
@@ -165,15 +195,22 @@ with st.sidebar:
 #  EJECUTAR
 # ══════════════════════════════════════════════════════════════════════
 if run_btn:
-    if uploaded is None:
+    if "df_raw" not in st.session_state:
         st.warning("Sube un archivo CSV primero.")
         st.stop()
 
-    with st.spinner("Cargando datos y ejecutando backtest…"):
-        try:
-            df = load_data(uploaded)
-        except Exception as e:
-            st.error(f"Error al leer el CSV: {e}")
+    with st.spinner("Ejecutando backtest…"):
+        # Filtrar por rango de fechas seleccionado
+        df = st.session_state["df_raw"]
+        if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+            d_start, d_end = date_range
+            df = df[(df["date_ny"] >= d_start) & (df["date_ny"] <= d_end)].reset_index(drop=True)
+        elif date_range is None or (isinstance(date_range, (list, tuple)) and len(date_range) < 2):
+            st.warning("Selecciona un rango de fechas completo (fecha inicio y fecha fin).")
+            st.stop()
+
+        if df.empty:
+            st.warning("No hay datos en el rango de fechas seleccionado.")
             st.stop()
 
         cfg = Config(
